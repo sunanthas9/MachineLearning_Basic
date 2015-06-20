@@ -1,0 +1,79 @@
+---
+title: "Weight Lifting"
+author: "Sunantha Sethuraman"
+date: "Wednesday, June 17, 2015"
+output: html_document
+---
+Monitoring activity quality using activity monitors is essential to ensure that activities such a weight lifting (analyzed here) are done the right way. Two datasets were provided, one training set and one test set. The training set was used to teach the computer to fit two different models and then the efficiency of the training set was cross-validated. The better out of the two models was chosen to predict the outputs for the test set.
+
+## 1. Reading data
+
+```{r, cache=TRUE}
+training <- read.csv("C:/Users/sunantha.s/Desktop/RCoursera/PML_proj/pml-training.csv")
+testing <- read.csv("C:/Users/sunantha.s/Desktop/RCoursera/PML_proj/pml-testing.csv")
+```
+
+## 2. Preprocessing data
+
+The training and the test sets had a lot of NA values. Not all modeling algortihms are  efficient at handling NAs. Hence, the datasets were subsetted based on NA-free columns of the test set. This reduced the variables from 160 to 60. Further, first seven columns were not treated as variables as they were just experiment information like timestamps. 
+
+The data was centered and scaled. Importantly, since many of the variables could have multi-collinearity, Principal Component Analysis (PCA) was used for dimension reduction. Not surprisingly, all 53 variables were reduced to 25 PCs still accounting 95% variability in the data.
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+library(caret)
+training <- training[,!apply(testing,2,function(x) any(is.na(x)))]
+testing <- testing[,!apply(testing,2,function(x) any(is.na(x)))]
+
+
+preProc <- preProcess(training[,-c(1:7,60)], method=c("center","scale","pca"), thresh=0.95)
+trainPC <- predict(preProc, training[,-c(1:7,60)])
+testPC <- predict(preProc, testing[,-c(1:7,60)])
+```
+
+## 3. Model 1: Partial least squares (regression approach)
+
+PLS model was used as a representative of regression based modeling. Since the output variable was categorical, the PLS collapses into discriminant analysis. Further, recursive k-fold cross validation approach with 10 subsets and 5 repetitions was used to cross validate the data. This cross-validation approach was chosen based on literature search which suggested it to be the most effective CV for many discrminant analyses.
+
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+
+set.seed(123)
+CrossVal <- trainControl(method="repeatedcv", number=10, repeats=5)
+plsFit <- train(training$classe ~., method="pls", data=trainPC, trControl=CrossVal)
+plsPred <- predict(plsFit, trainPC)
+confusionMatrix(plsPred, training$classe)
+
+```
+
+As observed from the confusion matrix, the accuracy of this model is about 36% and kappa-value is < 0.18. Quite clearly, this is not the best model as this is only slightly better than random guessing.
+
+## 4. Model 2: Random forest (classification approach)
+
+The second model takes a tree-based approach. Random Forest is more robust than simple trees as it involves boot-strapping. With inherent boot-strapping during modeling, it precludes any need for additional crossvalidation. The mtry parameter was chosen based on bestmtry() function (not shown in analysis).
+
+
+```{r, cache=TRUE, warning=FALSE, message=FALSE}
+
+library(randomForest)
+
+rfFit <- randomForest(training$classe ~., data=trainPC, mtry=5, ntree=1000, keep.forest=TRUE, importance=TRUE)
+rfFit
+Pred <- predict(rfFit, testPC)
+```
+
+As could be seen from the OOB (out of bag) error, which in our case is the estimate of out-of-sample error rate is only 1.66%. The model is more than 95% accurate and is definitely is a better model than the PLS. Given that the output variable was categorical, it is not very surprising that the tree-based approach performed better than regression approach (though this need not always be the case).
+
+Random forest model was used to predict the "classe" for the test data set.
+
+
+```{r, include=FALSE}
+pml_write_files <- function(x){
+  n= length(x)
+  for(i in 1:n) {
+    filename= paste0("problem_id_",i,".txt")
+    write.table(x[i], file=filename, quote=FALSE, row.names=FALSE,col.names=FALSE)
+    }
+  }
+pml_write_files(Pred)
+```
+                     
